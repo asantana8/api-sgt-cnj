@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.cert
 
 # Python
 __pycache__/
@@ -15,6 +18,8 @@ venv/
 env/
 ENV/
 .env/
+env.bak/
+venv.bak/
 
 # Distribuicao e empacotamento
 build/
@@ -38,9 +43,17 @@ htmlcov/
 
 # IDEs e sistema operacional
 .vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 .idea/
+*.swp
+*.swo
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # Logs e arquivos temporarios
 *.log
@@ -48,3 +61,4 @@ Thumbs.db
 *.temp
 *.db
 *.sqlite3
+*.sqlite
