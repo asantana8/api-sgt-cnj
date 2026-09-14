@@ -23,15 +23,16 @@ $$;
 
 ALTER ROLE sgt_user WITH LOGIN PASSWORD :'DB_PASSWORD';
 
--- CREATE DATABASE nao pode ser executado dentro de DO ou transacao.
-SELECT format(
-    'CREATE DATABASE cnj_sgt_db OWNER sgt_user ENCODING %L LC_COLLATE %L LC_CTYPE %L CONNECTION LIMIT -1',
-    'UTF8',
-    'pt_BR.UTF-8',
-    'pt_BR.UTF-8'
-)
+SELECT
+$$
+CREATE DATABASE cnj_sgt_db
+OWNER sgt_user
+ENCODING 'UTF8'
+$$
 WHERE NOT EXISTS (
-    SELECT 1 FROM pg_database WHERE datname = 'cnj_sgt_db'
+    SELECT 1
+    FROM pg_database
+    WHERE datname = 'cnj_sgt_db'
 )
 \gexec
 
