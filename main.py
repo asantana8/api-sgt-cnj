@@ -1,7 +1,8 @@
 import sys
 import uvicorn
 from fastapi import FastAPI
-from app.config import API_HOST, API_PORT
+from fastapi.middleware.cors import CORSMiddleware
+from app.config import API_HOST, API_PORT, CORS_ORIGINS
 from app.database import conectar_banco, verificar_estrutura_banco
 from app.controllers.itens_controller import router as itens_router
 from app.models.schemas import HealthResponse
@@ -13,6 +14,15 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
+)
+
+# Libera o consumo da API pelo front-end Angular (BrasilOpenAPI) rodando em outra origem.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Registra o roteador dos controllers

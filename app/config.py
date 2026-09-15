@@ -15,6 +15,17 @@ CNJ_WSDL_URL = os.getenv("CNJ_WSDL_URL", "https://www.cnj.jus.br/sgt/sgt_ws.php?
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 
+# Origens autorizadas a consumir a API via navegador (front-end Angular).
+# Pode ser sobrescrito por variavel de ambiente com valores separados por virgula.
+CORS_ORIGINS = [
+    origem.strip()
+    for origem in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:4200,http://127.0.0.1:4200"
+    ).split(",")
+    if origem.strip()
+]
+
 TABELAS_OBRIGATORIAS = (
     "classe",
     "assunto",
