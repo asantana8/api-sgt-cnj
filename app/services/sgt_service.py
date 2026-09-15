@@ -26,14 +26,63 @@ class SGTService:
             conn.rollback()
             print(f"Aviso: não foi possível registrar o log em sgt_cnj.log_sincronizacao: {erro_log}")
 
+    TERMOS_SINCRONIZACAO = [
+        'PROCESSO', 'ACAO', 'RECURSO', 'EXECUCAO', 'MANDADO', 'HABEAS', 'CRIME', 'PENAL', 'CIVIL',
+        'TRIBUTARIO', 'PREVIDENCIARIO', 'ADMINISTRATIVO', 'TRABALHO', 'FAZENDA', 'JUIZADO', 'AUTO',
+        'PEDIDO', 'SENTENCA', 'DESPACHO', 'DECISAO', 'ATO', 'CERTIDAO', 'INTIMACAO', 'CITACAO',
+        'JULGAMENTO', 'BAIXA', 'ARQUIVAMENTO', 'DISTRIBUICAO', 'REDISTRIBUICAO', 'AUDIENCIA',
+        'PERICIA', 'LAUDO', 'PENHORA', 'BLOQUEIO', 'LIBERACAO', 'EXPEDICAO', 'OFICIO', 'ALVARA',
+        'CARTA', 'PRECATÓRIA', 'ROGATORIA', 'AGRAVO', 'APELACAO', 'EMBARGOS', 'CONFLITO',
+        'EXCECAO', 'INCIDENTE', 'RECLAMACAO', 'REPRESENTACAO', 'INQUERITO', 'TERMO', 'NOTIFICACAO',
+        'HOMOLOGACAO', 'ACORDO', 'EXTINCAO', 'SUSPENSAO', 'SOBRESTAMENTO', 'REMESSA', 'RECEBIMENTO',
+        'JUNTADA', 'CONCLUSAO', 'VISTA', 'DECURSO', 'PUBLICACAO', 'TRANSITO', 'CUMPRIMENTO',
+        'DIREITO', 'CONTRATO', 'BENS', 'INDENIZACAO', 'DANO', 'COBRANCA', 'REGISTRO', 'MULTA',
+        'SERVICO', 'SERVIDOR', 'IMPOSTO', 'BENEFICIO', 'APOSENTADORIA', 'PENSAO', 'SAUDE',
+        'MEDICAMENTO', 'MEIO AMBIENTE', 'DESAPROPRIACAO', 'POSSE', 'PROPRIEDADE', 'FAMILIA',
+        'ALIMENTOS', 'DIVORCIO', 'INVENTARIO', 'SUCESSOES', 'FALENCIA', 'RECUPERACAO', 'TITULO',
+        'CHEQUE', 'NOTA', 'DUPLICATA', 'ALIENACAO', 'ARRENDAMENTO', 'LOCACAO', 'CONDOMINIO'
+    ]
+
+    def _obter_itens_soap(self, client, tipo_tabela: str) -> List[Any]:
+        """Obtém os itens do WebService SOAP do CNJ de forma resiliente."""
+        # Tenta primeiro a busca universal (caso o webservice suporte no futuro)
+        for coringa in ['%']:
+            try:
+                resposta = client.service.pesquisarItemPublicoWS(
+                    tipoTabela=tipo_tabela,
+                    tipoPesquisa='N',
+                    valorPesquisa=coringa
+                )
+                if resposta:
+                    return list(resposta)
+            except Exception:
+                pass
+
+        # Fallback resiliente: coleta por lista de termos jurídicos abrangentes (Nome e Glossário)
+        print(f"Executando varredura por termos estruturados no WebService SGT/CNJ (Tabela {tipo_tabela})...")
+        itens_unicos = {}
+        for termo in self.TERMOS_SINCRONIZACAO:
+            for tipo_pesquisa in ['N', 'G']:
+                try:
+                    resposta = client.service.pesquisarItemPublicoWS(
+                        tipoTabela=tipo_tabela,
+                        tipoPesquisa=tipo_pesquisa,
+                        valorPesquisa=termo
+                    )
+                    if resposta:
+                        for item in resposta:
+                            cod_item = extrair_atributo(item, 'cod_item', 'codItem', 'codigo')
+                            if cod_item and cod_item not in itens_unicos:
+                                itens_unicos[cod_item] = item
+                except Exception:
+                    continue
+
+        return list(itens_unicos.values())
+
     def sincronizar_tabela(self, client, conn, tipo_tabela: str, tabela_destino: str, coluna_pk: str, coluna_fk_pai: str) -> int:
         """Sincroniza uma tabela específica (C, A, M) com o webservice SOAP do CNJ."""
         print(f"\n--- Sincronizando {tabela_destino.upper()} (Tipo: {tipo_tabela}) ---")
-        resposta = client.service.pesquisarItemPublicoWS(
-            tipoTabela=tipo_tabela,
-            tipoPesquisa='N',
-            valorPesquisa='%'
-        )
+        resposta = self._obter_itens_soap(client, tipo_tabela)
 
         if not resposta:
             print(f"Nenhum registro retornado para a tabela {tabela_destino}.")
@@ -87,38 +136,53 @@ class SGTService:
         if tabela_destino == 'classe':
             colunas.insert(3, 'sigla')
 
-        colunas_sql = ', '.join(colunas)
-        valores_sql = ', '.join(['%s'] * len(colunas))
-        atualizacoes = [
+        # Insere em duas passagens para respeitar Foreign Keys mesmo com nós órfãos parciais:
+        # Passagem 1: Insere todos os registros com coluna_fk_pai = NULL
+        colunas_sem_pai = [c for c in colunas if c != coluna_fk_pai]
+        colunas_sem_pai_sql = ', '.join(colunas_sem_pai)
+        valores_sem_pai_sql = ', '.join(['%s'] * len(colunas_sem_pai))
+        atualizacoes_sem_pai = [
             f'{coluna} = EXCLUDED.{coluna}'
-            for coluna in colunas
-            if coluna not in (coluna_pk, coluna_fk_pai)
+            for coluna in colunas_sem_pai
+            if coluna != coluna_pk
         ]
-        atualizacoes.append('dt_alteracao = CURRENT_TIMESTAMP')
-        atualizacoes.append(
-            f"dt_inativacao = CASE WHEN EXCLUDED.tipo_situacao = 'I' "
-            f"THEN COALESCE(sgt_cnj.{tabela_destino}.dt_inativacao, CURRENT_TIMESTAMP) "
-            f"ELSE NULL END"
-        )
+        atualizacoes_sem_pai.append('dt_alteracao = CURRENT_TIMESTAMP')
 
-        query = f"""
+        query_sem_pai = f"""
             INSERT INTO sgt_cnj.{tabela_destino} (
-                {colunas_sql}
+                {colunas_sem_pai_sql}
             )
-            VALUES ({valores_sql})
+            VALUES ({valores_sem_pai_sql})
             ON CONFLICT ({coluna_pk}) DO UPDATE SET
-                {', '.join(atualizacoes)};
+                {', '.join(atualizacoes_sem_pai)};
         """
 
-        valores = [
-            tuple(r[coluna] for coluna in colunas)
+        valores_sem_pai = [
+            tuple(r[coluna] for coluna in colunas_sem_pai)
             for r in registros
+        ]
+
+        # Passagem 2: Atualiza a coluna do nó pai onde aplicável
+        query_atualizar_pai = f"""
+            UPDATE sgt_cnj.{tabela_destino}
+            SET {coluna_fk_pai} = %s,
+                dt_alteracao = CURRENT_TIMESTAMP
+            WHERE {coluna_pk} = %s;
+        """
+        # Apenas atualiza o pai se o registro do pai realmente existir no conjunto inserido
+        chaves_existentes = {r[coluna_pk] for r in registros}
+        valores_pai = [
+            (r[coluna_fk_pai], r[coluna_pk])
+            for r in registros
+            if r[coluna_fk_pai] and r[coluna_fk_pai] in chaves_existentes
         ]
 
         ids_origem = [r[coluna_pk] for r in registros]
 
         with conn.cursor() as cursor:
-            extras.execute_batch(cursor, query, valores, page_size=500)
+            extras.execute_batch(cursor, query_sem_pai, valores_sem_pai, page_size=500)
+            if valores_pai:
+                extras.execute_batch(cursor, query_atualizar_pai, valores_pai, page_size=500)
             
             if ids_origem:
                 cursor.execute(

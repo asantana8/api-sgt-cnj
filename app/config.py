@@ -1,11 +1,11 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 DB_CONFIG = {
     "dbname": os.getenv("DB_NAME", "cnj_sgt_db"),
-    "user": os.getenv("DB_USER", "postgres"),
+    "user": os.getenv("DB_USER", "sgt_user"),
     "password": os.getenv("DB_PASSWORD", ""),
     "host": os.getenv("DB_HOST", "localhost"),
     "port": os.getenv("DB_PORT", "5432")
